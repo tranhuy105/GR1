@@ -183,9 +183,9 @@ class EnhancedChatBot:
     def _default_selections(self):
         """Default selection options"""
         return [
-            {"text": "Xem sản phẩm", "value": "Xem sản phẩm"},
-            {"text": "Xem giỏ hàng", "value": "Xem giỏ hàng"},
-            {"text": "Chính sách", "value": "Chính sách"}
+            {"text": "Tôi muốn xem sản phẩm", "value": "Tôi muốn xem sản phẩm"},
+            {"text": "Tôi muốn xem giỏ hàng", "value": "Tôi muốn xem giỏ hàng"},
+            {"text": "Tôi muốn xem chính sách", "value": "Tôi muốn xem chính sách"}
         ]
 
     def invoke(self, question: str, verbose: bool = False) -> Dict[str, Any]:
@@ -385,7 +385,7 @@ class EnhancedChatBot:
         try:
             selection_prompt = ChatPromptTemplate.from_messages([
                 ("system",
-                 "Generate 2-4 helpful follow-up options for the user based on the conversation. "
+                 "Generate 2-3 helpful follow-up options for the user based on the conversation. "
                  "Format as short phrases (3-5 words). Use Vietnamese unless user speaks English. "
                  "If possible, try to aim for sales, always try to sell the product. "
                  f"Categories: {self.categories_str}. Materials: {self.materials_str}. "
