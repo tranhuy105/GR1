@@ -7,10 +7,10 @@ from langchain_core.runnables import RunnableConfig
 from agent import State, Assistant, assistant_runnable, safe_tools, sensitive_tools
 from utils import create_tool_node_with_fallback, _print_event
 from tools import fetch_user_order_information
-from db_setup_fixed import setup_database
+from db_setup import setup_database
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 builder = StateGraph(State)
@@ -54,91 +54,6 @@ graph = builder.compile(
     checkpointer=memory,
     interrupt_before=["sensitive_tools"]
 )
-
-# if __name__ == "__main__":
-    
-#     config = {
-#         "configurable": {
-#             "customer_id": "CUST001",
-#             "thread_id": "test_thread"
-#         }
-#     }
-    
-#     questions = [
-#         "Chào bạn, tôi muốn tìm tượng gỗ rẻ nhất",
-#         "Tìm đồ trang trí dưới 500k",
-#         "Tìm đồ gì đó làm quà tặng",
-#         "Chính sách đổi trả thế nào?",
-#         "Xem đơn hàng cũ của tôi",
-#         "Thêm 5 nón lá cọ cổ điển vào giỏ hàng",
-#         "Xem giỏ hàng hiện tại",
-#         "Cập nhật nón lá cọ cổ điển thành 3 cái",
-#         "Xem giỏ hàng hiện tại",
-#         "Thêm lại 3 nón lá cổ điển vào giỏ hàng",
-#         "Xem giỏ hàng hiện tại",
-#         "Xóa hết giỏ hàng",
-#         "Xem giỏ hàng hiện tại",
-#         "Đặt mua giỏ hàng hiện tại",
-#         "Hủy đơn hàng số 1",
-#         "Thêm 999 nón lá cổ điển vào giỏ hàng"
-#     ]
-    
-#     _printed = set()
-#     for question in questions:
-#         try:
-#             print(f"\nUser: {question}")
-#             events = graph.stream(
-#                 {"messages": [("user", question)], "user_info": []},
-#                 config,
-#                 stream_mode="values"
-#             )
-#             for event in events:
-#                 _print_event(event, _printed)
-#             snapshot = graph.get_state(config)
-            
-#             while snapshot.next:
-#                 try:
-#                     user_input = input(
-#                         "Bạn có đồng ý với hành động trên không? Gõ 'y' để tiếp tục; "
-#                         "hoặc giải thích lý do từ chối.\n\n"
-#                     )
-#                 except KeyboardInterrupt:
-#                     print("\nExiting...")
-#                     break
-#                 except:
-#                     user_input = "y"
-                
-#                 if user_input.strip() == "y":
-#                     result = graph.invoke(None, config)
-#                 else:
-#                     if "messages" in event and event["messages"] and hasattr(event["messages"][-1], "tool_calls") and event["messages"][-1].tool_calls:
-#                         last_tool_call = event["messages"][-1].tool_calls[0]
-#                         result = graph.invoke(
-#                             {
-#                                 "messages": [
-#                                     ToolMessage(
-#                                         tool_call_id=last_tool_call["id"],
-#                                         content=f"Hành động bị từ chối. Lý do: '{user_input}'. Vui lòng điều chỉnh và tiếp tục hỗ trợ."
-#                                     )
-#                                 ]
-#                             },
-#                             config,
-#                         )
-#                     else:
-#                         result = graph.invoke(
-#                             {
-#                                 "messages": [("user", f"Tôi không đồng ý: {user_input}. Vui lòng làm rõ hoặc điều chỉnh.")]
-#                             },
-#                             config,
-#                         )
-                
-#                 events = graph.stream(None, config, stream_mode="values")
-#                 for event in events:
-#                     _print_event(event, _printed)
-#                 snapshot = graph.get_state(config)
-#         except Exception as e:
-#             print(f"Lỗi khi xử lý câu hỏi: {str(e)}")
-#             continue
 
 if __name__ == "__main__":
     # clear database before running

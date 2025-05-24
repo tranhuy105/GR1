@@ -2,15 +2,15 @@ from typing import Dict, Any, Optional, Callable
 from langgraph.graph import END, StateGraph, START
 from langgraph.prebuilt import tools_condition
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent import State, Assistant, assistant_runnable, safe_tools, sensitive_tools
 from utils import create_tool_node_with_fallback, _print_event
-from tools import fetch_user_order_information
+from tools import fetch_user_order_information, view_cart
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class ChatBot:
@@ -38,10 +38,12 @@ class ChatBot:
 
         builder.add_node("fetch_user_info", fetch_customer_info)
         builder.add_edge(START, "fetch_user_info")
+        
         builder.add_node("assistant", Assistant(assistant_runnable))
+        builder.add_edge("fetch_user_info", "assistant")
+        
         builder.add_node("safe_tools", create_tool_node_with_fallback(safe_tools))
         builder.add_node("sensitive_tools", create_tool_node_with_fallback(sensitive_tools))
-        builder.add_edge("fetch_user_info", "assistant")
 
         def route_tools(state: State):
             next_node = tools_condition(state)
@@ -149,7 +151,7 @@ class ChatBot:
             return {"response": response, "status": "completed"}
 
 if __name__ == "__main__":
-    from db_setup_fixed import setup_database
+    from db_setup import setup_database
     setup_database(clear_existing=True)
 
     bot = ChatBot()

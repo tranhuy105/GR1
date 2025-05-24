@@ -1,7 +1,8 @@
 from typing import Annotated, Dict, Any, List
 from datetime import datetime
 from typing_extensions import TypedDict
-
+import os
+from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -17,6 +18,9 @@ from tools import (
     place_order,
     cancel_order
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
@@ -27,6 +31,7 @@ class Assistant:
         self.runnable = runnable
 
     def __call__(self, state: State, config: RunnableConfig):
+        # Let the LLM handle all requests directly
         while True:
             result = self.runnable.invoke(state)
             if not result.tool_calls and (
@@ -40,7 +45,15 @@ class Assistant:
                 break
         return {"messages": result}
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.7)
+def getLLm():
+    use_ollama=os.getenv("USE_OLLAMA") == "true"
+    temperature=float(os.getenv("LLM_TEMPERATURE"))
+    if use_ollama:
+        return ChatOllama(model=os.getenv("LLM_MODEL"), temperature=temperature)
+    else:
+        return ChatGoogleGenerativeAI(model=os.getenv("LLM_MODEL"), temperature=temperature)
+
+llm = getLLm()
 
 assistant_prompt = ChatPromptTemplate.from_messages(
     [
@@ -48,14 +61,7 @@ assistant_prompt = ChatPromptTemplate.from_messages(
             "system",
             "You are a friendly customer support assistant for a handicraft store. "
             "Respond in Vietnamese if the user speaks Vietnamese, otherwise use English. "
-            "Use tools to search products, check orders, manage cart, or assist with policies. "
-            "When searching products, use categories ('Nón', 'Giỏ', 'Đồ Gia Dụng', 'Tranh', 'Tượng') "
-            "and materials ('Lá cọ', 'Tre', 'Gỗ', 'Vải', 'Mây', 'Đá'). "
-            "For vague requests (e.g., 'something', 'mua 10 cái'), clarify by asking about "
-            "category (e.g., 'Nón hay Tượng?'), material (e.g., 'Gỗ hay Tre?'), price range (e.g., 'Dưới 500k?'), "
-            "or quantity (e.g., 'Cụ thể bao nhiêu cái?'). "
-            "For 'đắt nhất' or 'most expensive', use search_products with sort_by_price='desc'. "
-            "For 'rẻ nhất' or 'cheapest', use sort_by_price='asc'. "
+            "Use tools to search products, check orders, place order, manage cart, or assist with policies. "
             "Always check stock_quantity with search_products before calling add_to_cart or place_order. "
             "If stock is insufficient, suggest alternatives (e.g., 'Chỉ còn 5 Nón, muốn xem Giỏ không?'). "
             "If no products match, explain (e.g., 'Không tìm thấy Tượng Gỗ, thử Tranh nhé?'). "
@@ -70,6 +76,7 @@ assistant_prompt = ChatPromptTemplate.from_messages(
         ("placeholder", "{messages}"),
     ]
 ).partial(time=str(datetime.now()))
+
 
 safe_tools = [
     fetch_user_order_information,
