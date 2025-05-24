@@ -412,34 +412,3 @@ class EnhancedChatBot:
         except Exception as e:
             logger.error(f"Error generating selections: {str(e)}")
             return self._default_selections()
-
-# Usage example
-if __name__ == "__main__":
-    from db_setup_fixed import setup_database
-    setup_database(clear_existing=True)
-
-    bot = EnhancedChatBot()
-    print("Chào bạn! Hãy nhập câu hỏi (gõ 'exit' để thoát):")
-
-    while True:
-        question = input("\nYou: ")
-        if question.lower().strip() == "exit":
-            print("Tạm biệt!")
-            break
-
-        result = bot.invoke(question, verbose=True)
-        print(f"\nAssistant: {result['response']}")
-        
-        if result['status'] == 'waiting':
-            # Handle approval
-            user_input = input("Bạn có đồng ý không? (y/n): ")
-            approved = user_input.strip().lower() == 'y'
-            
-            approval_result = bot.handle_approval(approved)
-            print(f"\nAssistant: {approval_result['response']}")
-        
-        # Show selections
-        if result.get('selections'):
-            print("\nGợi ý:")
-            for i, sel in enumerate(result['selections'], 1):
-                print(f"{i}. {sel['text']}")
