@@ -116,11 +116,8 @@ def lookup_store_policy(query: str) -> str:
     """
     Retrieves store policy information based on the user's query about store policies.
 
-    Use this tool when the user asks about store policies, such as shipping, returns, payment methods, warranty, bulk orders, or custom services.
-    The LLM should interpret the query and map it to one of the following policy categories: shipping, returns, payment, warranty, order_process, bulk_sales, custom_services.
-    Example: "What is your return policy?" → LLM maps to "returns" → returns the return policy.
-             "How much is shipping?" → LLM maps to "shipping" → returns the shipping policy.
-             "Can I get a custom order?" → LLM maps to "custom_services" → returns the custom services policy.
+    Use this tool when the user asks about store policies.
+    The only accepted query is "shipping", "returns", "payment", "warranty", "order_process", "bulk_sales", "custom_services".
 
     Args:
         query: The user's question about store policies (e.g., "What is the shipping cost?" or "How do I return an item?").

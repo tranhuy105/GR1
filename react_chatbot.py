@@ -18,14 +18,15 @@ from utils import create_tool_node_with_fallback, debug_log, log_state
 logger = logging.getLogger(__name__)
 
 # Enhanced State that includes thinking
-class ThinkingState(TypedDict):
+class ReACTState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     user_info: Dict[str, Any]
+    thinking: Optional[str]  # Store the thinking process
     selections: Optional[List[Dict[str, str]]]
     pending_approval: Optional[Dict[str, Any]]
     next_action: Optional[str]
 
-class EnhancedChatBot:
+class ReACTChatBot:
     def __init__(self, customer_id="CUST001"):
         self.memory = MemorySaver()
         self.llm = getLLm()
@@ -52,20 +53,19 @@ class EnhancedChatBot:
         return value in ["1", "true", "yes", "on", "t"]
 
     def _build_graph(self):
-        """Build the LangGraph with proper approval handling like the first implementation"""
-        debug_log("=== BUILDING GRAPH ===")
-        builder = StateGraph(ThinkingState)
+        """Build the ReACT LangGraph with thinking step"""
+        debug_log("=== BUILDING ReACT GRAPH ===")
+        builder = StateGraph(ReACTState)
 
-         # 1. Initialize - Return static customer info
-        def fetch_customer_info(state: ThinkingState, config: RunnableConfig):
+        # 1. Initialize - Return static customer info
+        def fetch_customer_info(state: ReACTState, config: RunnableConfig):
             debug_log("Fetching static customer info")
             try:
-                # Static user information - customize as needed
                 user_info = {
                     "customer_id": config["configurable"]["customer_id"],
-                    "name": "Nguyen Van A",
+                    "name": "Trần Quang Huy",
                     "phone": "+84 123 456 789",
-                    "email": "nguyenvana@example.com",
+                    "email": "imhuy105@example.com",
                     "address": "123 Le Loi Street, District 1, Ho Chi Minh City",
                     "membership_level": "Gold",
                     "registration_date": "2023-01-15",
@@ -78,51 +78,106 @@ class EnhancedChatBot:
                 debug_log(f"Error creating customer info: {str(e)}", level="ERROR")
                 return {"user_info": {}}
 
-        # 2. Assistant - Main response generation with enhanced debugging
-        def assistant(state: ThinkingState, config: RunnableConfig):
-            """Main assistant node with full context"""
-            debug_log("=== ASSISTANT NODE ENTRY ===")
-            log_state(state, "ASSISTANT_INPUT")
+        # 2. ANALYZE - Analyze the user's request and plan response
+        def analyze_request(state: ReACTState, config: RunnableConfig):
+            """ReACT Thinking step - analyze user request and plan response"""
+            debug_log("=== ANALYZE NODE ENTRY ===")
             
-            assistant_prompt = ChatPromptTemplate.from_messages([
+            # Get the last user message
+            user_message = None
+            for msg in reversed(state["messages"]):
+                if hasattr(msg, 'type') and msg.type == "human":
+                    user_message = msg.content
+                    break
+            
+            if not user_message:
+                debug_log("No user message found for analysis")
+                return {"thinking": "No user input to analyze"}
+            
+            thinking_prompt = ChatPromptTemplate.from_messages([
+                ("system",
+                 "You are analyzing a customer's request for a Vietnamese handicraft store. "
+                 "Think step by step about what the customer wants and how to help them best.\n"
+                 f"Store categories: {self.categories_str}\n"
+                 f"Store materials: {self.materials_str}\n"
+                 "Tools available: "
+                    f"{', '.join([tool.name for tool in safe_tools + sensitive_tools])}\n\n"
+                 "Customer info: {user_info}\n\n"
+                 "THINKING PROCESS:\n"
+                 "1. What is the customer asking for?\n"
+                 "2. What information do I need to gather? (vague question should collect more data instead of calling tool - like product recommend)\n"
+                 "3. What tools might I need to use?\n"
+                 "4. What would be the most helpful response?\n"
+                 "5. Are there any sales opportunities?\n\n"
+                 "Respond with your thinking process in Vietnamese, be concise but thorough. Dont use markdown formatting.\n"
+                ),
+                ("human", "Customer request: {user_message}")
+            ])
+            
+            try:
+                chain = thinking_prompt | self.llm
+                result = chain.invoke({
+                    "user_message": user_message,
+                    "user_info": state.get("user_info", {})
+                })
+                
+                thinking_content = result.content
+                debug_log("Analysis process completed", {
+                    "thinking_preview": thinking_content if thinking_content else "No thinking"
+                })
+                
+                return {"thinking": thinking_content}
+            except Exception as e:
+                debug_log(f"Error in analysis: {str(e)}", level="ERROR")
+                return {"thinking": f"Lỗi trong quá trình suy nghĩ: {str(e)}"}
+
+        # 3. ACTION - Main response generation based on thinking
+        def action(state: ReACTState, config: RunnableConfig):
+            """ReACT Action step - generate response based on thinking"""
+            debug_log("=== ACTION NODE ENTRY ===")
+            log_state(state, "ACTION_INPUT")
+            
+            action_prompt = ChatPromptTemplate.from_messages([
                 ("system",
                  "You are a friendly customer support assistant for a Vietnamese handicraft store. "
                  "Respond in Vietnamese if the user speaks Vietnamese, otherwise use English. "
                  f"Store categories: {self.categories_str}. "
                  f"Store materials: {self.materials_str}. "
-                 "\n\nGuidelines:"
-                 "\n- Check stock before adding to cart"
-                 "\n- Suggest alternatives if out of stock"
+                 "\n\nYou have already thought about the customer's request: {thinking}"
+                 "\n\nNow take ACTION based on your thinking:"
+                 "\n- Use tools when necessary (view cart, add to cart, etc.)"
+                 "\n- Provide helpful information"
+                 "\n- Suggest products when appropriate"
                  "\n- Keep responses helpful and concise"
-                 "\n- When you need to use tools, use them directly without explaining"
                  "\nCustomer info: {user_info}"
                  "\nCurrent time: {time}"
                 ),
                 ("placeholder", "{messages}")
             ]).partial(time=str(datetime.now()))
             
-            debug_log("Binding tools to LLM")
+            debug_log("Binding tools to LLM for action")
             
-            chain = assistant_prompt | self.llm.bind_tools(safe_tools + sensitive_tools)
-            debug_log("Invoking LLM chain")
+            chain = action_prompt | self.llm.bind_tools(safe_tools + sensitive_tools)
+            debug_log("Invoking LLM chain for action")
             
             result = chain.invoke({
                 "messages": state["messages"],
-                "user_info": state.get("user_info", [])
+                "thinking": state.get("thinking", "Không có suy nghĩ trước đó"),
+                "user_info": state.get("user_info", {})
             })
             
-            debug_log("LLM result received", {
+            debug_log("Action result received", {
                 "has_content": bool(result.content),
-                "content_preview": result.content[:100] if result.content else "No content",
+                "content_preview": result.content if result.content else "No content",
                 "has_tool_calls": bool(result.tool_calls),
                 "tool_calls_count": len(result.tool_calls) if result.tool_calls else 0
             })
             
-            debug_log("=== ASSISTANT NODE EXIT ===")
+            debug_log("=== ACTION NODE EXIT ===")
             return {"messages": [result]}
 
-        # 3. Generate selections based on conversation context
-        def generate_selections(state: ThinkingState, config: RunnableConfig):
+        # 4. Generate selections based on conversation context
+        def generate_selections(state: ReACTState, config: RunnableConfig):
             """Generate follow-up options based on the conversation"""
             debug_log("=== GENERATE SELECTIONS NODE ===")
             
@@ -152,6 +207,7 @@ class EnhancedChatBot:
                     ("system",
                      "Generate 2-4 helpful follow-up options for the user based on the conversation. "
                      "Format as short phrases (3-5 words). Use Vietnamese unless user speaks English. "
+                     "Consider the thinking process: {thinking} "
                      "If possible, try to aim for sales, always try to sell the product. "
                      f"Categories: {self.categories_str}. Materials: {self.materials_str}. "
                      "Return each option on a new line, no numbering or bullets."
@@ -161,7 +217,8 @@ class EnhancedChatBot:
                 
                 chain = selection_prompt | self.llm
                 result = chain.invoke({
-                    "response": last_assistant_msg
+                    "response": last_assistant_msg,
+                    "thinking": state.get("thinking", "")
                 })
                 
                 debug_log("LLM selection result", {
@@ -183,8 +240,8 @@ class EnhancedChatBot:
                 debug_log(f"Error generating selections: {str(e)}", level="ERROR")
                 return {"selections": self._default_selections()}
 
-        # 4. Handle tool routing with enhanced debugging
-        def route_tools(state: ThinkingState):
+        # 5. Handle tool routing with enhanced debugging
+        def route_tools(state: ReACTState):
             """Route to appropriate tool node based on tool sensitivity"""
             debug_log("=== ROUTING TOOLS ===")
             
@@ -216,34 +273,35 @@ class EnhancedChatBot:
 
         # Add all nodes
         builder.add_node("fetch_user_info", fetch_customer_info)
-        builder.add_node("assistant", assistant)
+        builder.add_node("analyze_request", analyze_request)  # NEW: Analysis step
+        builder.add_node("action", action)                    # Renamed from "assistant"
         builder.add_node("safe_tools", create_tool_node_with_fallback(safe_tools))
         builder.add_node("sensitive_tools", create_tool_node_with_fallback(sensitive_tools))
         builder.add_node("generate_selections", generate_selections)
 
-        # Define the flow - CRITICAL: Same structure as working first implementation
+        # Define the ReACT flow: Analyze -> Act -> Use Tools (if needed) -> Generate Selections
         builder.add_edge(START, "fetch_user_info")
-        builder.add_edge("fetch_user_info", "assistant")
+        builder.add_edge("fetch_user_info", "analyze_request")  # NEW: Always analyze first
+        builder.add_edge("analyze_request", "action")           # Then act based on analysis
         
-        # Route from assistant to tools or selections
+        # Route from action to tools or selections
         builder.add_conditional_edges(
-            "assistant", 
+            "action", 
             route_tools, 
             ["safe_tools", "sensitive_tools", "generate_selections"]
         )
         
-        # Safe tools go back to assistant, then generate selections
-        builder.add_edge("safe_tools", "assistant")
+        # Safe tools go back to action for final response, then generate selections
+        builder.add_edge("safe_tools", "action")
         
-        # Sensitive tools go back to assistant, then generate selections
-        builder.add_edge("sensitive_tools", "assistant")
+        # Sensitive tools go back to action for final response, then generate selections
+        builder.add_edge("sensitive_tools", "action")
         
         # Selections end the flow
         builder.add_edge("generate_selections", END)
 
-        debug_log("Graph built successfully")
+        debug_log("ReACT Graph built successfully")
         
-        # CRITICAL: Use same interrupt pattern as first implementation
         return builder.compile(
             checkpointer=self.memory,
             interrupt_before=["sensitive_tools"]
@@ -259,16 +317,16 @@ class EnhancedChatBot:
 
     def invoke(self, question: str, verbose: bool = False) -> Dict[str, Any]:
         """
-        Invoke the chatbot with enhanced debugging
+        Invoke the ReACT chatbot with enhanced debugging
         """
-        debug_log("=== INVOKE CHATBOT ===")
+        debug_log("=== INVOKE ReACT CHATBOT ===")
         debug_log(f"User question: {question}")
         
         if verbose:
             print(f"\nUser: {question}")
 
         # Stream through the graph with event logging
-        debug_log("Streaming through graph")
+        debug_log("Streaming through ReACT graph")
         events = self.graph.stream(
             {"messages": [("user", question)]},
             self.config,
@@ -280,6 +338,8 @@ class EnhancedChatBot:
         for event in events:
             event_count += 1
             debug_log(f"Event {event_count} received")
+            if verbose and event.get("thinking"):
+                print(f"💭 Analysis: {event['thinking']}")
             final_state = event
 
         debug_log(f"Stream complete, processed {event_count} events")
@@ -288,7 +348,8 @@ class EnhancedChatBot:
             return {
                 "response": "Không có phản hồi.",
                 "status": "error",
-                "selections": self._default_selections()
+                "selections": self._default_selections(),
+                "thinking": None
             }
 
         # Check if we're waiting for approval
@@ -304,7 +365,8 @@ class EnhancedChatBot:
                 return {
                     "response": "Không có hành động nhạy cảm.",
                     "status": "completed",
-                    "selections": self._default_selections()
+                    "selections": self._default_selections(),
+                    "thinking": final_state.get("thinking")
                 }
 
             tool_call = ai_message.tool_calls[0]
@@ -321,6 +383,7 @@ class EnhancedChatBot:
                 "status": "waiting",
                 "waiting_for_approval": True,
                 "tool_call": tool_call,
+                "thinking": final_state.get("thinking"),
                 "selections": [
                     {"text": "Đồng ý", "value": "approve"},
                     {"text": "Từ chối", "value": "reject"}
@@ -336,7 +399,7 @@ class EnhancedChatBot:
         if self.use_llm_selections:
             debug_log("Generating selections for response")
             try:
-                selections = self._generate_selections_for_response(response)
+                selections = self._generate_selections_for_response(response, final_state.get("thinking"))
             except Exception as e:
                 debug_log(f"Error generating selections: {str(e)}", level="ERROR")
                 selections = self._default_selections()
@@ -347,7 +410,8 @@ class EnhancedChatBot:
         return {
             "response": response,
             "status": "completed",
-            "selections": selections
+            "selections": selections,
+            "thinking": final_state.get("thinking")  # Return thinking for debugging
         }
 
     def _generate_approval_message(self, tool_call: Dict[str, Any]) -> str:
@@ -394,7 +458,8 @@ class EnhancedChatBot:
                 return {
                     "response": "Không có hành động đang chờ xác nhận.",
                     "status": "completed",
-                    "selections": self._default_selections()
+                    "selections": self._default_selections(),
+                    "thinking": None
                 }
 
             # Get the tool call that needs approval
@@ -406,7 +471,8 @@ class EnhancedChatBot:
                 return {
                     "response": "Không thể tìm thấy hành động cần xác nhận.",
                     "status": "error",
-                    "selections": self._default_selections()
+                    "selections": self._default_selections(),
+                    "thinking": current_state.get("thinking")
                 }
 
             tool_call = ai_message.tool_calls[0]
@@ -438,7 +504,7 @@ class EnhancedChatBot:
                 if self.use_llm_selections:
                     debug_log("Generating selections for post-approval response")
                     try:
-                        selections = self._generate_selections_for_response(response)
+                        selections = self._generate_selections_for_response(response, final_state.get("thinking"))
                     except Exception as e:
                         debug_log(f"Error generating selections: {str(e)}", level="ERROR")
                         selections = self._default_selections()
@@ -449,7 +515,8 @@ class EnhancedChatBot:
                 return {
                     "response": response,
                     "status": "completed",
-                    "selections": selections
+                    "selections": selections,
+                    "thinking": final_state.get("thinking")
                 }
             else:
                 debug_log("Tool rejected, handling rejection")
@@ -493,7 +560,8 @@ class EnhancedChatBot:
                 return {
                     "response": response,
                     "status": "completed",
-                    "selections": self._default_selections()
+                    "selections": self._default_selections(),
+                    "thinking": final_state.get("thinking")
                 }
                 
         except Exception as e:
@@ -502,12 +570,13 @@ class EnhancedChatBot:
             return {
                 "response": f"Đã xảy ra lỗi khi xử lý xác nhận: {str(e)}",
                 "status": "error",
-                "selections": self._default_selections()
+                "selections": self._default_selections(),
+                "thinking": None
             }
 
-    def _generate_selections_for_response(self, response: str) -> List[Dict[str, str]]:
-        """Generate selections based on a response"""
-        debug_log("Generating selections from response")
+    def _generate_selections_for_response(self, response: str, thinking: Optional[str] = None) -> List[Dict[str, str]]:
+        """Generate selections based on a response and thinking"""
+        debug_log("Generating selections from response and thinking")
         
         if not self.use_llm_selections:
             debug_log("LLM selections disabled, returning defaults")
@@ -518,6 +587,7 @@ class EnhancedChatBot:
                 ("system",
                  "Generate 2-3 helpful follow-up options for the user based on the conversation. "
                  "Format as short phrases (3-5 words). Use Vietnamese unless user speaks English. "
+                 "Consider the thinking process: {thinking} "
                  "If possible, try to aim for sales, always try to sell the product. "
                  f"Categories: {self.categories_str}. Materials: {self.materials_str}. "
                  "Return each option on a new line, no numbering or bullets."
@@ -527,7 +597,8 @@ class EnhancedChatBot:
             
             chain = selection_prompt | self.llm
             result = chain.invoke({
-                "response": response
+                "response": response,
+                "thinking": thinking or "Không có thông tin suy nghĩ"
             })
             
             debug_log("LLM selection result received", {
@@ -549,3 +620,12 @@ class EnhancedChatBot:
             debug_log(f"Error generating selections: {str(e)}", level="ERROR")
             logger.error(f"Error generating selections: {str(e)}")
             return self._default_selections()
+
+    def get_thinking_process(self) -> Optional[str]:
+        """Get the last thinking process for debugging"""
+        try:
+            snapshot = self.graph.get_state(self.config)
+            return snapshot.values.get("thinking") if snapshot.values else None
+        except Exception as e:
+            debug_log(f"Error getting thinking process: {str(e)}", level="ERROR")
+            return None

@@ -11,3 +11,4 @@ uvicorn
 pydantic
 regex
 faiss-cpu
+scikit-learn

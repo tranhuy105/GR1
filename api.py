@@ -8,9 +8,9 @@ import uvicorn
 import uuid
 import os
 from dotenv import load_dotenv
-from db_setup import setup_database
 
 # Import our enhanced chatbot
+from react_chatbot import ReACTChatBot
 from enhanced_chatbot import EnhancedChatBot
 
 # Load environment variables
@@ -64,7 +64,7 @@ async def chat(request: ChatRequest):
         session_id = request.session_id or str(uuid.uuid4())
         
         if session_id not in active_sessions:
-            active_sessions[session_id] = EnhancedChatBot(customer_id=request.customer_id)
+            active_sessions[session_id] = ReACTChatBot(customer_id=request.customer_id)
         
         chatbot = active_sessions[session_id]
         
